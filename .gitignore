@@ -91,3 +91,6 @@ output
 model
 
 .db
+
+# managed by tantara
+env

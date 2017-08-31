@@ -538,6 +538,27 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                                    bias=Convolution5_scale_bias, no_bias=False)
         return Convolution5 * 2.5, Convolution5_scale
 
+    def get_refiner(self, layer, resnet):
+        # FIXME kenerl, no_bias
+        conv2 = mx.symbol.Convolution(name='G_conv2', data=layer , num_filter=64, pad=(1,1), kernel=(5,5), stride=(3,3), no_bias=False)
+        repeated = conv2
+        conv3 = mx.symbol.Convolution(name='G_conv3', data=repeated , num_filter=1, pad=(1,1), kernel=(5,5), stride=(1,1), no_bias=False)
+        output = mx.symbol.tanh(name='G_tanh', data=conv3)
+
+        return output
+    
+    def get_discrim(self, layer):
+        # FIXME kenerl, no_bias
+        conv2 = mx.symbol.Convolution(name='D_conv2', data=layer , num_filter=96, pad=(2,2), kernel=(5,5), stride=(3,3), no_bias=False)
+        conv3 = mx.symbol.Convolution(name='D_conv3', data=conv2 , num_filter=64, pad=(2,2), kernel=(5,5), stride=(3,3), no_bias=False)
+        pool3 = mx.symbol.Pooling(name='D_pool3', data=conv3 , pooling_convention='full', pad=(1,1), kernel=(2,2), stride=(3,3), pool_type='max')
+        conv4 = mx.symbol.Convolution(name='D_conv4', data=pool3 , num_filter=32, pad=(1,1), kernel=(5,5), stride=(3,3), no_bias=False)
+        conv5 = mx.symbol.Convolution(name='D_conv5', data=conv4 , num_filter=32, pad=(1,1), kernel=(5,5), stride=(1,1), no_bias=False)
+        logits = mx.symbol.Convolution(name='D_conv6', data=conv5 , num_filter=2, pad=(1,1), kernel=(5,5), stride=(1,1), no_bias=False)
+        output = mx.sym.SoftmaxActivation(data=logits, mode="channel", name="D_softmax")
+
+        return output, logits
+
     def get_train_symbol(self, cfg):
 
         # config alias for convenient
@@ -560,9 +581,17 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         flow_grid = mx.sym.GridGenerator(data=flow, transform_type='warp', name='flow_grid')
         warp_conv_feat = mx.sym.BilinearSampler(data=conv_feat, grid=flow_grid, name='warping_feat')
         warp_conv_feat = warp_conv_feat * scale_map
-        select_conv_feat = mx.sym.take(mx.sym.Concat(*[warp_conv_feat, conv_feat], dim=0), eq_flag)
+        refiner = self.get_refiner(warp_conv_feat)
+        select_conv_feat = mx.sym.take(mx.sym.Concat(*[refiner, conv_feat], dim=0), eq_flag)
 
         conv_feats = mx.sym.SliceChannel(select_conv_feat, axis=1, num_outputs=2)
+
+        # Discriminator layer
+        frame_feat = mx.sym.Variable(name="frame_feat")
+        discrim, logits = self.get_discrim(frame_feat)
+
+        # refined vs cur_feat
+        cur_feat = self.get_resnet_v1(data)
 
         # RPN layers
         rpn_feat = conv_feats[0]

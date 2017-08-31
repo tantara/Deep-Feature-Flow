@@ -78,6 +78,57 @@ class RCNNAccMetric(mx.metric.EvalMetric):
         self.sum_metric += np.sum(pred_label.flat == label.flat)
         self.num_inst += len(pred_label.flat)
 
+class RefinerLogLossMetric(mx.metric.EvalMetric):
+    def __init__(self):
+        super(RPNLogLossMetric, self).__init__('RefinerLogLoss')
+        self.pred, self.label = get_rpn_names()
+
+    def update(self, labels, preds):
+        pred = preds[self.pred.index('rpn_cls_prob')]
+        label = labels[self.label.index('rpn_label')]
+
+        # label (b, p)
+        label = label.asnumpy().astype('int32').reshape((-1))
+        # pred (b, c, p) or (b, c, h, w) --> (b, p, c) --> (b*p, c)
+        pred = pred.asnumpy().reshape((pred.shape[0], pred.shape[1], -1)).transpose((0, 2, 1))
+        pred = pred.reshape((label.shape[0], -1))
+
+        # filter with keep_inds
+        keep_inds = np.where(label != -1)[0]
+        label = label[keep_inds]
+        cls = pred[keep_inds, label]
+
+        cls += 1e-14
+        cls_loss = -1 * np.log(cls)
+        cls_loss = np.sum(cls_loss)
+        self.sum_metric += cls_loss
+        self.num_inst += label.shape[0]
+
+class DiscrimLogLossMetric(mx.metric.EvalMetric):
+    def __init__(self):
+        super(RPNLogLossMetric, self).__init__('DiscrimLogLoss')
+        self.pred, self.label = get_rpn_names()
+
+    def update(self, labels, preds):
+        pred = preds[self.pred.index('rpn_cls_prob')]
+        label = labels[self.label.index('rpn_label')]
+
+        # label (b, p)
+        label = label.asnumpy().astype('int32').reshape((-1))
+        # pred (b, c, p) or (b, c, h, w) --> (b, p, c) --> (b*p, c)
+        pred = pred.asnumpy().reshape((pred.shape[0], pred.shape[1], -1)).transpose((0, 2, 1))
+        pred = pred.reshape((label.shape[0], -1))
+
+        # filter with keep_inds
+        keep_inds = np.where(label != -1)[0]
+        label = label[keep_inds]
+        cls = pred[keep_inds, label]
+
+        cls += 1e-14
+        cls_loss = -1 * np.log(cls)
+        cls_loss = np.sum(cls_loss)
+        self.sum_metric += cls_loss
+        self.num_inst += label.shape[0]
 
 class RPNLogLossMetric(mx.metric.EvalMetric):
     def __init__(self):
